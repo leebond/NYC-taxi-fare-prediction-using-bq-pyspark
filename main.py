@@ -5,12 +5,15 @@ Created on Sun Jan 12 17:11:53 2020
 
 @author: leebond
 """
+from __future__ import print_function
+
 import sys
-from pyspark.sql.functions import abs
+from pyspark.sql.functions import abs, to_timestamp
 from pyspark import SparkContext, SparkConf, SQLContext
 from datetime import datetime
+from pyspark.sql.session import SparkSession
 
-def getData(limit):
+def getDataForLocal(limit):
     from google.cloud import bigquery
 
     client = bigquery.Client()
@@ -31,11 +34,36 @@ def getData(limit):
     
     return client.query(query)
 
-def run(n):
-    data = getData(n).to_dataframe() # converts a QueryJob object to a Pandas dataframe
-#    print(data.shape)
+def getDataForDataproc():
+    '''
+    A different method is required to read data from BigQuery from Dataproc as Dataproc does not have
+    google-cloud python package preinstalled. Even after attempting to install the package via the
+    via the SSH console, it still doesn't work
+    '''
+    # Read the data from BigQuery as a Spark Dataframe.
+    df = spark.read.format("bigquery").option("table", "bigquery-public-data.new_york.tlc_yellow_trips_2016").load()
+    df = df.filter(df.fare_amount > 2.5)
+    df = df.filter(df.trip_distance > 0)
+    df = df.filter(df.trip_distance < 1000)
+    df = df.filter(df.dropoff_latitude != 0)
+    df = df.filter(df.dropoff_longitude != 0)
+    df = df.filter(df.pickup_latitude != 0)
+    df = df.filter(df.pickup_longitude != 0)
+#    to_timestamp(df.t, 'yyyy-MM-dd HH:mm:ss')
+#    df = df.filter(to_timestamp(df.dropoff_datetime, ) > to_timestamp(df.pickup_datetime)
+#    df = df.filter((to_timestamp(df.dropoff_datetime, ) - to_timestamp(df.pickup_datetime, )/3600 <=24 )
+
+    return df
+
+def run(n, mode):
+    if mode == '--small':
+        data = getDataForLocal(n).to_dataframe() # to_dataframe() converts a QueryJob object to a Pandas dataframe
+#        print(data.shape)
+        spark_df = sqlContext.createDataFrame(data).cache() # createDataFrame converts a Pandas dataframe to Spark dataframe()
+    elif mode == '--large':
+        spark_df = getDataForDataproc()
+        n = spark_df.count()
     
-    spark_df = sqlContext.createDataFrame(data).cache()
     
     ## create sum_xy and sum_xx terms -> these are terms needed in OLS calculation
     spark_df = spark_df.select("fare_amount", "trip_distance", (spark_df.trip_distance*spark_df.fare_amount).alias("distxfare"),\
@@ -44,7 +72,7 @@ def run(n):
     sum_all = spark_df.groupBy().sum().collect()
     
     sum_y, sum_x, sum_xy, sum_xx = sum_all[0]
-
+    
     beta_1 = (sum_xy - (sum_x*sum_y)/n)/(sum_xx - (sum_x**2)/n)
     beta_0 = sum_y/n - beta_1*sum_x/n
     
@@ -71,20 +99,23 @@ if __name__=='__main__':
 
     conf = SparkConf()
     sc = SparkContext(conf=conf)
-    sqlContext = SQLContext(sc) 
+    sqlContext = SQLContext(sc)
+    spark = SparkSession(sc)
+    
+    mode = str(sys.argv[1])
 
-    if str(sys.argv[1]) == '--small':
-        n = 10000
+    if mode == '--small':
+        n = 100000
         st = datetime.now()
-        run(n)
+        run(n, mode)
         elapse = datetime.now() - st
         print("Time taken to run small dataset: %s mins %s secs" %(elapse.seconds//60, elapse.seconds))
 
     
-    elif str(sys.argv[1]) == '--large':
+    elif mode == '--large':
         n = ''
         st = datetime.now()
-        run(n)
+        run(n, mode)
         elapse = datetime.now() - st
         print("Time taken to run small dataset: %s mins %s secs" %(elapse.seconds//60, elapse.seconds))
         
