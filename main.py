@@ -8,6 +8,7 @@ Created on Sun Jan 12 17:11:53 2020
 import sys
 from pyspark.sql.functions import abs
 from pyspark import SparkContext, SparkConf, SQLContext
+from datetime import datetime
 
 def getData(limit):
     from google.cloud import bigquery
@@ -30,26 +31,9 @@ def getData(limit):
     
     return client.query(query)
 
-
-    
-
-if __name__=='__main__':
-#    if len(sys.argv) != 2:
-#        print("Usage: python <python-file.py> <mode>", file=sys.stderr)
-#        exit(-1)
-#    
-#    if str(sys.argv[1]) == '--small':
-#        
-#        print('running small dataset')
-#        ##todo read small dataset, then run linear model
-#    elif str(sys.argv[1]) == '--big':
-
-    n = 1000
+def run(n):
     data = getData(n).to_dataframe() # converts a QueryJob object to a Pandas dataframe
-    print(data.shape)
-    conf = SparkConf()
-    sc = SparkContext(conf=conf)
-    sqlContext = SQLContext(sc) 
+#    print(data.shape)
     
     spark_df = sqlContext.createDataFrame(data).cache()
     
@@ -73,12 +57,35 @@ if __name__=='__main__':
     spark_df = spark_df.withColumn("y_var", (spark_df.fare_amount - y_mean)**2)
     sum_all = spark_df.groupBy().sum().collect()
     sum_y, sum_x, sum_xy, sum_xx, OLSPred_sum, r_abs_sum, r_sq_sum, y_var_sum = sum_all[0]
-    
-    
+        
 #    print(spark_df.show(2))
     print("With a dataset of training size %s," %n)
     print("beta_1: %s, beta_0: %s " %(beta_1, beta_0))
     print("MSE: %s, MAE: %s, R2: %s" %(r_sq_sum/n, r_abs_sum/n, 1-r_sq_sum/y_var_sum))
     
+
+if __name__=='__main__':
+    if len(sys.argv) != 2:
+        print("Usage: python <python-file.py> <mode>", file=sys.stderr)
+        exit(-1)
+
+    conf = SparkConf()
+    sc = SparkContext(conf=conf)
+    sqlContext = SQLContext(sc) 
+
+    if str(sys.argv[1]) == '--small':
+        n = 10000
+        st = datetime.now()
+        run(n)
+        elapse = datetime.now() - st
+        print("Time taken to run small dataset: %s mins %s secs" %(elapse.seconds//60, elapse.seconds))
+
     
+    elif str(sys.argv[1]) == '--large':
+        n = ''
+        st = datetime.now()
+        run(n)
+        elapse = datetime.now() - st
+        print("Time taken to run small dataset: %s mins %s secs" %(elapse.seconds//60, elapse.seconds))
+        
     sc.stop()    
